@@ -15,3 +15,4 @@ for idx, row in df.iterrows():
         df.drop(idx, inplace=True)
 print(len(df))
 print(count)
+df.to_csv("/home/ubuntu/cs231nFinalProject/panda_data/filtered_images.csv")

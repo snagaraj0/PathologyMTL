@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 #Misc imports
 from sklearn.model_selection import StratifiedKFold
-from tqdm import tqdm_notebook as tqdm
+from tqdm import tqdm
 import albumentations
 import time
 
@@ -37,7 +37,9 @@ BASE_PATH = "/home/ubuntu/cs231nFinalProject/panda_data"
 data_folder = os.path.join(BASE_PATH, "all_images")
 masks_path = os.path.join(BASE_PATH, "train_label_masks")
 
-all_df = pd.read_csv(os.path.join(BASE_PATH, "images.csv"))
+all_df = pd.read_csv(os.path.join(BASE_PATH, "filtered_images.csv"))
+
+print(f"Size of all images: {len(all_df)}")
 
 images = list(all_df['image_id'])
 labels = list(all_df['isup_grade'])
@@ -51,12 +53,9 @@ for i, (train_idx, test_idx) in enumerate(skf.split(all_df, all_df['isup_grade']
 # Create patches from WSI image
 #If > 95% of tile is white, flag that tile
 
-# TO-DO: Add caching for patches to save compute time
 def create_patches(img):
     patch_size, image_size = 256, 256
     n_patches = 36
-    batch_size = 2
-    num_workers = 4
     
     patches = []
     H, W, _ = img.shape
@@ -82,6 +81,8 @@ def create_patches(img):
         patches.append({'patches': filtered_img[i], 'idx': i})
     return patches, useful_patches >= n_patches
 
+
+
 class PandaDataset(Dataset):
     def __init__(self, df, image_size, n_tiles = 36, transforms=None):
         self.df = df.reset_index(drop=True)
@@ -92,6 +93,7 @@ class PandaDataset(Dataset):
         return len(self.df)
     # Custom get item function
     def __getitem__(self, idx):
+        """
         if idx > len(self.df):
             idx = len(self.df) - 1
         img_path = os.path.join(data_folder, f"{self.df.iloc[idx]['image_id']}.tiff")
@@ -128,6 +130,7 @@ class PandaDataset(Dataset):
         labels = np.zeros(5).astype(np.float32)
         labels[: self.df.iloc[idx]["isup_grade"]] = 1.
         return torch.tensor(imgs), torch.tensor(labels)
+        """
 
 # Create transforms of patches
 transforms_train = albumentations.Compose([
@@ -143,15 +146,19 @@ df_test = all_df.loc[np.where((all_df["fold"] == 0))[0]]
 train_loader = PandaDataset(df_train, 256, 36, transforms=transforms_train)
 test_loader = PandaDataset(df_test, 256, 36, transforms=None)
 
-train_loader = torch.utils.data.DataLoader(train_loader, batch_size=20, sampler=RandomSampler(train_loader),
+train_loader = torch.utils.data.DataLoader(train_loader, batch_size=50, sampler=RandomSampler(train_loader),
                                             num_workers = 1)
-test_loader = torch.utils.data.DataLoader(test_loader, batch_size=20, sampler=RandomSampler(train_loader),
+test_loader = torch.utils.data.DataLoader(test_loader, batch_size=50, sampler=RandomSampler(test_loader),
                                             num_workers = 1)
 
-densenet = torchvision.models.densenet121(pretrained=True)
+print(len(train_loader))
+print(len(test_loader))
+
+densenet = torchvision.models.densenet121(pretrained=True).to(device)
 num_features = densenet.classifier.in_features
+# 5 grading classes
 num_classes = 5 
-densenet.classifier = nn.Linear(num_features, num_classes)
+densenet.classifier = nn.Linear(num_features, num_classes).to(device)
 
 for param in densenet.parameters():
     param.requires_grad = False
@@ -162,14 +169,13 @@ for param in densenet.parameters():
 # 256x256 pre-trained
 configuration = ViTConfig(image_size=1536)
 model = ViTModel(configuration).to(device)
-model.cuda()
 loss_func = nn.BCEWithLogitsLoss()
 
 def train_loop(loader, opt):
     model.train()
     train_loss = []
     #preds, targets = [], []
-    for (data, label) in loader:
+    for (data, label) in tqdm(loader):
         data, label = data.to(device, dtype=torch.float), label.to(device, dtype=torch.float)
         opt.zero_grad()
         logits = model(data)
@@ -187,9 +193,9 @@ def test_loop(loader):
     test_loss = []
     preds, targets = [], []
     with torch.no_grad():
-        for (data, label) in loader:
+        for (data, label) in tqdm(loader):
             data, label = data.to(device, dtype=torch.float), label.to(device, dtype=torch.float)
-            logits = model(data)
+            logits = densenet(data)
             loss = loss_func(logits, label)
             # Get pred by taking sigmoid of logits
             pred = logits.sigmoid().sum(1).detach().round()

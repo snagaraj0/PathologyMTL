@@ -1,55 +1,44 @@
-import numpy as np
 import os
-import sys
-import glob
-import boto3
-import multiprocessing
-# Make module accessible
-sys.path.append('/home/ubuntu/softwares/WSITools')
-from wsitools.tissue_detection.tissue_detector import TissueDetector 
-from wsitools.patch_extraction.patch_extractor import ExtractorParameters, PatchExtractor
+import cv2
+import skimage.io
+from tqdm.notebook import tqdm
+import zipfile
+import numpy as np
 
+imgs = "/home/ubuntu/cs231nFinalProject/panda_data/all_images/"
+masks = "/home/ubuntu/cs231nFinalProject/panda_data/train_label_masks/"
 
+out_patch_zip = "/home/ubuntu/cs231nFinalProject/panda_data/image_patches.zip"
+out_mask_zip = "/home/ubuntu/cs231nFinalProject/panda_data/mask_patches.zip"
 
-def create_patches(input_paths: list, output_dir):
-    num_processors = 200                     # Number of processes that can be running at once
-    #wsi_fn = "/path/2/file.tff"             # Define a sample image that can be read by OpenSlide
+# Create patches from WSI image
+#If > 95% of tile is white, flag that tile
+def create_patches(img, mask):
+    patch_size, image_size = 256, 256
+    n_patches = 36
+    
+    
+    patches = []
+    H, W, _ = img.shape
+    pad_h = (patch_size - H % patch_size) % patch_size
+    pad_w = (patch_size - W % patch_size) % patch_size
+    # Pad with white
+    padded_img = np.pad(img, [[pad_h // 2, pad_h - pad_h // 2], [pad_w // 2, pad_w - pad_w // 2], [0,0]], constant_values=255)
+    padded_mask = np.pad(img, [[pad_h // 2, pad_h - pad_h // 2], [pad_w // 2, pad_w - pad_w // 2], [0,0]], constant_values=0)
 
-    # Define the parameters for Patch Extraction, including generating an thumbnail from which to traverse over to find
-    # tissue.
-    parameters = ExtractorParameters(output_dir, # Where the patches should be extracted to
-        save_format = '.png',                      # Can be '.jpg', '.png', or '.tfrecord'
-        sample_cnt = -1,                           # Limit the number of patches to extract (-1 == all patches)
-        patch_size = 256,                          # Size of patches to extract (Height & Width)
-        rescale_rate = 128,                        # Fold size to scale the thumbnail to (for faster processing)
-        patch_filter_by_area = 0.5,                # Amount of tissue that should be present in a patch
-        with_anno = True,                          # If true, you need to supply an additional XML file
-        extract_layer = 0                          # OpenSlide Level
-    )
+    padded_img = padded_img.reshape(padded_img.shape[0] // patch_size, # number of tiles in h-dimension
+            patch_size,
+            padded_img.shape[1] // patch_size, # number of tiles in width dimension
+            patch_size,
+            3)
+    padded_img = padded_img.transpose(0,2,1,3,4).reshape(-1, patch_size, patch_size, 3)
+    
+    if len(padded_img) < n_patches:
+        padded_img = np.pad(padded_img, [[0, n_tiles - len(padded_img)], [0,0], [0,0], [0,0]], constant_values=255)
+    # select most representative tiles
+    indices = np.argsort(padded_img.reshape(padded_img.shape[0],-1).sum(-1))[:n_patches]
+    filtered_img = padded_img[indices]
+    for i in range(len(filtered_img)):
+        patches.append({'patches': filtered_img[i], 'idx': i})
+    return patches
 
-    # Choose a method for detecting tissue in thumbnail image
-    tissue_detector = TissueDetector("LAB_Threshold",   # Can be LAB_Threshold or GNB
-        threshold = 85,                                   # Number from 1-255, anything less than this number means there is tissue
-        training_files = None                             # Training file for GNB-based detection
-    )
-
-    # Create the extractor object
-    patch_extractor = PatchExtractor(tissue_detector,
-        parameters,
-        feature_map = None,                       # See note below
-        annotations = None                        # Object of Annotation Class (see other note below)
-    )
-
-    # Run the extraction process
-    multiprocessing.set_start_method('spawn')
-    pool = multiprocessing.Pool(processes = num_processors)
-    pool.map(patch_extractor.extract, input_paths)
-
-if __name__ == '__main__':
-   data_folder = "/home/ubuntu/data/images"
-   tiffs = []
-   for file in glob.glob(data_folder + "/*"):
-       tiffs.append(file)
-
-   output_dir = "/home/ubuntu/data/image_patches"    # Define an output directory
-   create_patches(tiffs, output_dir)
