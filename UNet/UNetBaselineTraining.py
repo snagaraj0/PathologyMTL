@@ -1,17 +1,32 @@
-# Training script adapted from https://www.youtube.com/watch?v=IHq1t7NxS8k
-
 from UNet import UNet
+from UN
 
 import torch
 from tqdm import tqdm
 import torch.nn as nn
 import torch.optim as optim
 
+BASE_PATH = "/home/ubuntu/cs231nFinalProject/panda_data"
+data_folder = os.path.join(BASE_PATH, "image_patches")
+masks_path = os.path.join(BASE_PATH, "mask_patches")
+
+all_df = pd.read_csv(os.path.join(BASE_PATH, "filtered_image_patches.csv"))
+
+print(f"Size of all images: {len(all_df)}")
+
+images = list(all_df['image_id'])
+
+skf = StratifiedKFold(5, shuffle=True, random_state=42)
+all_df['fold'] = -1
+for i, (train_idx, test_idx) in enumerate(skf.split(all_df, all_df['isup_grade'])):
+    # Set up testing fold
+    all_df.loc[test_idx, 'fold'] = i
+
 # Hyperparams
 lr = 1e-4
 device = "cuda" if torch.cuda.is_available() else "cpu"
 batch_size = 36
-num_epochs = 100
+num_epochs = 5
 num_workers = 8
 i_width = 256 * 6
 i_height = 256 * 6
@@ -44,23 +59,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-import os
-import numpy as np
-import skimage.io as io
-
-directory = "../panda_data/train_label_masks"
-
-for filename in os.listdir(directory):
-    f = os.path.join(directory, filename)
-    image = io.imread(f)
-    if np.sum(image) != 0:
-        image = np.asarray(image)
-        x, y, z = image.shape
-        image = image.reshape((z, x, y))
-        print(image.shape)
-        print(np.max(image))
-        print(np.max(image[0, :, :]))
-        print(np.max(image[1, :, :]))
-        print(np.max(image[2, :, :]))

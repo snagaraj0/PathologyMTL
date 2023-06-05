@@ -9,7 +9,7 @@ class UNet(nn.Module):
     def __init__(
         self,
         in_channels=3,
-        n_classes=1,
+        n_classes=3,
         depth=5,
         wf=6,
         padding=True,
@@ -71,7 +71,7 @@ class UNet(nn.Module):
                 x = F.max_pool2d(x, 2)
 
         for i, up in enumerate(self.up_path):
-            x = up(x, blocks[-i - 1])
+            x = up(x, blocks[-i - 1]) 
 
         return self.last(x)
 
